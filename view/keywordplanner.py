@@ -9,6 +9,7 @@ import pandas as pd
 from textwrap import dedent
 import plotly.express as px
 import os
+import json
 
 # Initialize session state if needed
 if 'initialized' not in st.session_state:
@@ -20,17 +21,15 @@ def initialize_bigquery_client():
     Initialize BigQuery client using credentials.
     """
     try:
-        # Set the credentials environment variable if not already set
-        if "GOOGLE_APPLICATION_CREDENTIALS" not in os.environ:
-            credentials_path = st.secrets["general"].get("GOOGLE_APPLICATION_CREDENTIALS")
-            if credentials_path:
-                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
-            else:
-                st.error("Google credentials file path not found in secrets.")
-                return None
+        # For local development - load credentials directly
+        credentials_info = {
+            "type": "service_account",
+            "project_id": "is-madt3-6610424015",
+            # Add other credential fields here
+        }
         
-        # Initialize BigQuery client
-        client = bigquery.Client()
+        credentials = service_account.Credentials.from_service_account_info(credentials_info)
+        client = bigquery.Client(credentials=credentials, project=credentials.project_id)
         st.success("BigQuery client initialized successfully!")
         return client
     except Exception as e:
