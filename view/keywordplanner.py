@@ -13,6 +13,65 @@ from typing import Optional
 import os
 import tempfile
 
+
+# Initialize session state if needed
+if 'initialized' not in st.session_state:
+    st.session_state.initialized = True
+    st.session_state.history = []
+
+def initialize_credentials():
+    """Initialize all required API keys and credentials."""
+    try:
+        # Load OpenAI API key
+        openai.api_key = st.secrets["OPENAI_API_KEY"]
+
+        # Load Serper API key
+        serper_api_key = st.secrets["SERPER_API_KEY"]
+        serper_tool = SerperDevTool(api_key=serper_api_key)
+
+        # Load Google credentials
+        try:
+            # If using JSON content directly
+            service_account_json = st.secrets["general"].get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+            if service_account_json:
+                google_credentials_info = json.loads(service_account_json)
+                google_credentials = service_account.Credentials.from_service_account_info(google_credentials_info)
+            else:
+                # If using a file path
+                google_credentials_path = st.secrets["general"].get("GOOGLE_APPLICATION_CREDENTIALS")
+                if google_credentials_path:
+                    google_credentials = service_account.Credentials.from_service_account_file(google_credentials_path)
+                else:
+                    raise KeyError("Missing both GOOGLE_APPLICATION_CREDENTIALS_JSON and GOOGLE_APPLICATION_CREDENTIALS.")
+            
+            st.success("Google credentials initialized successfully!")
+        except json.JSONDecodeError as e:
+            st.error("Error decoding GOOGLE_APPLICATION_CREDENTIALS_JSON. Please check your secrets.toml.")
+            st.error(f"Details: {str(e)}")
+        except Exception as e:
+            st.error(f"An error occurred while initializing Google credentials: {str(e)}")
+
+
+        # Load Gemini API key (if applicable)
+        gemini_api_key = st.secrets.get("GEMINI_API_KEY", "")
+        if not gemini_api_key:
+            st.warning("Gemini API key is not set in secrets. Some features may not work.")
+
+        st.success("All credentials initialized successfully!")
+        return {
+            "serper_tool": serper_tool,
+            "google_credentials": google_credentials,
+            "gemini_api_key": gemini_api_key
+        }
+
+    except json.JSONDecodeError as e:
+        st.error("Error decoding GOOGLE_APPLICATION_CREDENTIALS JSON. Please check your secrets.toml.")
+        st.error(f"Details: {str(e)}")
+        return None
+
+    except KeyError as e:
+        st.error(f"Missing required key in secrets: {str(e)}")
+        return None
 class GoogleBigQueryTool(BaseTool):
     def __init__(self):
         super().__init__(
