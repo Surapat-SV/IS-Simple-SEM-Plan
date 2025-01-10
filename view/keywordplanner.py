@@ -29,7 +29,7 @@ class GoogleBigQueryTool(BaseTool):
                 else:
                     # Clean up the string - handle triple-quoted string format
                     credentials_json = credentials_json.strip()
-                    # Parse JSON
+                    credentials_json = credentials_json.replace("\n", "\\n")  # Escape invalid characters
                     credentials_info = json.loads(credentials_json)
 
                 # Create credentials and client
@@ -40,16 +40,24 @@ class GoogleBigQueryTool(BaseTool):
                 )
                 st.success("BigQuery client initialized successfully!")
                 
+            except json.JSONDecodeError as e:
+                st.error(f"Failed to parse credentials JSON: {str(e)}")
+                if st.checkbox("Show credentials debug info"):
+                    st.write(credentials_json)
+                self._client = None
             except Exception as e:
                 st.error(f"Failed to initialize credentials: {str(e)}")
                 if st.checkbox("Show credentials debug info"):
                     st.write("Credentials type:", type(credentials_json))
+                self._client = None
         except Exception as e:
             st.error(f"Failed to initialize BigQuery client: {str(e)}")
             self._client = None
 
     def _run(self, query: str) -> str:
         """Execute the tool's main functionality"""
+        if not self._client:
+            return "BigQuery client not initialized."
         try:
             df = self._execute_query(query)
             if df.empty:
