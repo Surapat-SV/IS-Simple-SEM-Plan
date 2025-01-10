@@ -14,6 +14,23 @@ from bs4 import BeautifulSoup
 import json
 import pandas as pd
 import re
+from datetime import datetime
+
+# Define Pydantic models for structured data
+class KeywordAnalysis(BaseModel):
+    keyword: str
+    score: float
+
+class KeywordComparison(BaseModel):
+    common_keywords: List[str]
+    aquapro_unique_keywords: List[str]
+    goprothai_unique_keywords: List[str]
+    opportunities: List[str]
+
+class AnalysisOutput(BaseModel):
+    top_keywords: List[KeywordAnalysis]
+    keyword_comparison: KeywordComparison
+    similarity_score: float
 
 class CustomWebScraper(BaseTool):
     name: str = Field(default="Custom Web Scraper")
@@ -63,7 +80,7 @@ class CustomWebScraper(BaseTool):
                     "description": description_text
                 },
                 "content": cleaned_text,
-                "html": str(soup)  # Keep original HTML for further processing if needed
+                "html": str(soup)
             }
 
         except Exception as e:
@@ -163,32 +180,100 @@ class WebsiteContentAnalyzer:
         # Content Analysis Task
         analysis_task = Task(
             description=f"""
-            Analyze the website content:
-            1. Process Thai content using NLP techniques
-            2. Calculate TF-IDF scores for keywords
-            3. Compare content similarity
-            4. Identify gaps and opportunities
-            
-            Return analysis in this format:
+            Analyze the website content and ensure the output matches this exact structure:
             {{
                 "top_keywords": [
                     {{"keyword": "word1", "score": 0.8}},
                     {{"keyword": "word2", "score": 0.6}}
                 ],
                 "keyword_comparison": {{
-                    "common_keywords": [...],
-                    "aquapro_unique_keywords": [...],
-                    "goprothai_unique_keywords": [...],
-                    "opportunities": [...]
+                    "common_keywords": ["keyword1", "keyword2"],
+                    "aquapro_unique_keywords": ["unique1", "unique2"],
+                    "goprothai_unique_keywords": ["comp1", "comp2"],
+                    "opportunities": ["opportunity1", "opportunity2"]
                 }},
                 "similarity_score": 0.75
             }}
+            
+            Important rules:
+            1. All numeric values must be valid float numbers between 0 and 1
+            2. The similarity_score must always be a float
+            3. All lists must be non-null arrays
+            4. All keywords must be non-empty strings
             """,
             agent=analyzer,
             expected_output="A JSON object containing keyword analysis, comparison results, and content insights"
         )
 
         return [scraping_task, analysis_task]
+
+    def _extract_research_data(self, crew_output: Any) -> Dict[str, Any]:
+        """Extract structured data from crew output with proper error handling"""
+        try:
+            # Get the text content from CrewOutput
+            output_text = str(crew_output.result if hasattr(crew_output, 'result') else crew_output)
+            
+            # Look for JSON content between triple backticks
+            json_match = re.search(r'```json\s*(.*?)\s*```', output_text, re.DOTALL)
+            if json_match:
+                # Parse the JSON content
+                data = json.loads(json_match.group(1))
+                
+                # Validate the data structure
+                try:
+                    analysis_output = AnalysisOutput(**data)
+                    data = analysis_output.dict()
+                except Exception as e:
+                    st.warning(f"Data validation error: {str(e)}")
+                    # Provide default values if validation fails
+                    data = {
+                        "top_keywords": [],
+                        "keyword_comparison": {
+                            "common_keywords": [],
+                            "aquapro_unique_keywords": [],
+                            "goprothai_unique_keywords": [],
+                            "opportunities": []
+                        },
+                        "similarity_score": 0.0
+                    }
+                
+                # Structure the data with safe default values
+                structured_data = {
+                    "keywords": {
+                        "main_site": data.get("top_keywords", []),
+                        "competitors": []
+                    },
+                    "insights": {
+                        "similarity_score": float(data.get("similarity_score", 0.0)),
+                        "keyword_comparison": data.get("keyword_comparison", {})
+                    },
+                    "recommendations": {
+                        "common_keywords": data.get("keyword_comparison", {}).get("common_keywords", []),
+                        "unique_keywords": {
+                            "main_site": data.get("keyword_comparison", {}).get("aquapro_unique_keywords", []),
+                            "competitor": data.get("keyword_comparison", {}).get("goprothai_unique_keywords", [])
+                        },
+                        "opportunities": data.get("keyword_comparison", {}).get("opportunities", [])
+                    }
+                }
+                
+                return structured_data
+            else:
+                return {
+                    "keywords": {"main_site": [], "competitors": []},
+                    "insights": {"similarity_score": 0.0},
+                    "recommendations": {"opportunities": []}
+                }
+                
+        except Exception as e:
+            st.warning(f"Error processing analysis data: {str(e)}")
+            return {
+                "error": str(e),
+                "raw_output": output_text if 'output_text' in locals() else "No output available",
+                "keywords": {"main_site": [], "competitors": []},
+                "insights": {"similarity_score": 0.0},
+                "recommendations": {"opportunities": []}
+            }
 
     def analyze_website(self) -> Optional[Dict[str, Any]]:
         try:
@@ -217,7 +302,7 @@ class WebsiteContentAnalyzer:
             final_data = {
                 "website": self.website_url,
                 "analysis_results": processed_data,
-                "collected_at": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+                "collected_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
 
             return final_data
@@ -227,61 +312,6 @@ class WebsiteContentAnalyzer:
             if 'raw_agent_output' in st.session_state:
                 st.expander("Debug: Raw Agent Output").code(st.session_state['raw_agent_output'])
             return None
-
-    def _extract_research_data(self, crew_output: Any) -> Dict[str, Any]:
-        """Extract structured data from crew result"""
-        try:
-            # Get the text content from CrewOutput
-            if hasattr(crew_output, 'result'):
-                output_text = str(crew_output.result)
-            else:
-                output_text = str(crew_output)
-            
-            # Look for JSON content between triple backticks
-            json_match = re.search(r'```json\s*(.*?)\s*```', output_text, re.DOTALL)
-            if json_match:
-                # Parse the JSON content
-                data = json.loads(json_match.group(1))
-                
-                # Structure the data according to our display format
-                structured_data = {
-                    "keywords": {
-                        "main_site": data.get("top_keywords", []),
-                        "competitors": []  # Will be filled from keyword_comparison
-                    },
-                    "insights": {
-                        "similarity_score": data.get("similarity_score", 0),
-                        "keyword_comparison": data.get("keyword_comparison", {})
-                    },
-                    "recommendations": {
-                        "common_keywords": data.get("keyword_comparison", {}).get("common_keywords", []),
-                        "unique_keywords": {
-                            "main_site": data.get("keyword_comparison", {}).get("aquapro_unique_keywords", []),
-                            "competitor": data.get("keyword_comparison", {}).get("goprothai_unique_keywords", [])
-                        },
-                        "opportunities": data.get("keyword_comparison", {}).get("opportunities", [])
-                    }
-                }
-                
-                return structured_data
-            else:
-                # If no JSON found, return the raw text
-                return {
-                    "keywords": {"main_site": [], "competitors": []},
-                    "insights": {"raw_text": output_text},
-                    "recommendations": {"raw_text": output_text}
-                }
-                
-        except Exception as e:
-            st.warning(f"Error processing analysis data: {str(e)}")
-            # Return empty structure with error message
-            return {
-                "error": str(e),
-                "raw_output": output_text if 'output_text' in locals() else "No output available",
-                "keywords": {"main_site": [], "competitors": []},
-                "insights": {},
-                "recommendations": {}
-            }
 
 def run_webanalyst(website_url: Optional[str] = None) -> None:
     st.title("Website Keyword Analyzer")
@@ -357,11 +387,13 @@ def run_webanalyst(website_url: Optional[str] = None) -> None:
                         st.header("Website Insights")
                         insights = analysis_data['insights']
                         
-                        # Display similarity score
+                        # Display similarity score with safe type conversion
                         if 'similarity_score' in insights:
-                            st.metric("Site Keyword Similarity Score", 
-                                    f"{insights['similarity_score']*100:.1f}%")
-                        
+                            similarity_score = float(insights.get('similarity_score', 0.0))
+                            st.metric(
+                                "Site Keyword Similarity Score", 
+                                f"{similarity_score * 100:.1f}%"
+                            )
                         # Display keyword gaps
                         if 'keyword_comparison' in insights:
                             st.subheader("Keyword Analysis")
