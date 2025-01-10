@@ -72,6 +72,9 @@ def run_business_analyst_chatbot():
     # Initialize session state
     if "messages" not in st.session_state:
         st.session_state["messages"] = []
+        # Only add the greeting when initializing messages for the first time
+        greeting = "Hello! I'm here to assist you with your business. Let's get started!"
+        st.session_state["messages"].append({"role": "assistant", "content": greeting})
     if "context" not in st.session_state:
         st.session_state["context"] = {}
     if "thread_id" not in st.session_state:
@@ -80,12 +83,6 @@ def run_business_analyst_chatbot():
         st.session_state["current_question_index"] = 0
 
     chatbot = BusinessAnalystChatbot()
-
-    # Greeting
-    if not st.session_state["messages"]:
-        greeting = "Hello! I'm here to assist you with your business. Let's get started!"
-        st.session_state["messages"].append({"role": "assistant", "content": greeting})
-        st.chat_message("assistant").write(greeting)
 
     # Display chat history
     for msg in st.session_state["messages"]:
