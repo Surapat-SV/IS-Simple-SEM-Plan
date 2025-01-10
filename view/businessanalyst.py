@@ -73,7 +73,7 @@ def run_business_analyst_chatbot():
     if "messages" not in st.session_state:
         st.session_state["messages"] = []
         # Only add the greeting when initializing messages for the first time
-        greeting = "Hello! I'm here to assist you with your business. Let's get started!"
+        greeting = "Hello! My name is K'Bus. Can you tell me your Business Name?"
         st.session_state["messages"].append({"role": "assistant", "content": greeting})
     if "context" not in st.session_state:
         st.session_state["context"] = {}
