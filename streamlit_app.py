@@ -12,10 +12,10 @@ from google.oauth2 import service_account
 from crewai_tools import SerperDevTool
 
 # Import views
-from views.businessanalyst import run_businessanalyst
-from views.webanalyst import run_webanalyst
-from views.keywordplanner import run_keywordplanner_agent
-from views.adcopy import run_adcopy
+from view.businessanalyst import run_businessanalyst
+from view.webanalyst import run_webanalyst
+from view.keywordplanner import run_keywordplanner_agent
+from view.adcopy import run_adcopy
 
 # Initialize session state if needed
 if 'initialized' not in st.session_state:
