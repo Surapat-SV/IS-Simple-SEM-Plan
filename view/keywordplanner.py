@@ -2,7 +2,7 @@
 
 import streamlit as st
 from crewai import Agent, Task, Crew, Process, LLM
-from crewai_tools import BaseTool
+from crewai.tools import BaseTool  # Fixed import
 from google.cloud import bigquery
 from google.oauth2 import service_account
 import pandas as pd
