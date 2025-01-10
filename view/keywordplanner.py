@@ -1,102 +1,49 @@
 # view/keywordplanner.py
 
 import streamlit as st
-from crewai import Agent, Task, Crew, Process, LLM
-from crewai.tools import BaseTool  # Fixed import
+from crewai import Agent, Task, LLM
+from crewai.tools import BaseTool
 from google.cloud import bigquery
 from google.oauth2 import service_account
 import pandas as pd
 from textwrap import dedent
 import plotly.express as px
-import json
-from typing import Optional
 import os
-import tempfile
-
 
 # Initialize session state if needed
 if 'initialized' not in st.session_state:
     st.session_state.initialized = True
     st.session_state.history = []
 
-def initialize_credentials():
-    """Initialize all required API keys and credentials."""
+def initialize_bigquery_client():
+    """
+    Initialize BigQuery client using credentials.
+    """
     try:
-        # Load OpenAI API key
-        openai.api_key = st.secrets["OPENAI_API_KEY"]
-
-        # Load Serper API key
-        serper_api_key = st.secrets["SERPER_API_KEY"]
-        serper_tool = SerperDevTool(api_key=serper_api_key)
-
-        # Load Google credentials
-        try:
-            # If using JSON content directly
-            service_account_json = st.secrets["general"].get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
-            if service_account_json:
-                google_credentials_info = json.loads(service_account_json)
-                google_credentials = service_account.Credentials.from_service_account_info(google_credentials_info)
+        # Set the credentials environment variable if not already set
+        if "GOOGLE_APPLICATION_CREDENTIALS" not in os.environ:
+            credentials_path = st.secrets["general"].get("GOOGLE_APPLICATION_CREDENTIALS")
+            if credentials_path:
+                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
             else:
-                # If using a file path
-                google_credentials_path = st.secrets["general"].get("GOOGLE_APPLICATION_CREDENTIALS")
-                if google_credentials_path:
-                    google_credentials = service_account.Credentials.from_service_account_file(google_credentials_path)
-                else:
-                    raise KeyError("Missing both GOOGLE_APPLICATION_CREDENTIALS_JSON and GOOGLE_APPLICATION_CREDENTIALS.")
-            
-            st.success("Google credentials initialized successfully!")
-        except json.JSONDecodeError as e:
-            st.error("Error decoding GOOGLE_APPLICATION_CREDENTIALS_JSON. Please check your secrets.toml.")
-            st.error(f"Details: {str(e)}")
-        except Exception as e:
-            st.error(f"An error occurred while initializing Google credentials: {str(e)}")
-
-
-        # Load Gemini API key (if applicable)
-        gemini_api_key = st.secrets.get("GEMINI_API_KEY", "")
-        if not gemini_api_key:
-            st.warning("Gemini API key is not set in secrets. Some features may not work.")
-
-        st.success("All credentials initialized successfully!")
-        return {
-            "serper_tool": serper_tool,
-            "google_credentials": google_credentials,
-            "gemini_api_key": gemini_api_key
-        }
-
-    except json.JSONDecodeError as e:
-        st.error("Error decoding GOOGLE_APPLICATION_CREDENTIALS JSON. Please check your secrets.toml.")
-        st.error(f"Details: {str(e)}")
-        return None
-
-    except KeyError as e:
-        st.error(f"Missing required key in secrets: {str(e)}")
+                st.error("Google credentials file path not found in secrets.")
+                return None
+        
+        # Initialize BigQuery client
+        client = bigquery.Client()
+        st.success("BigQuery client initialized successfully!")
+        return client
+    except Exception as e:
+        st.error(f"Error initializing BigQuery client: {e}")
         return None
 
 class GoogleBigQueryTool(BaseTool):
-    def __init__(self):
+    def __init__(self, client):
         super().__init__(
             name="Google BigQuery Keyword Tool",
             description="Fetches keyword data from BigQuery database with monthly searches and competition data",
         )
-        try:
-            # Fetch credentials from Streamlit secrets
-            credentials_json = st.secrets["general"]["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
-            
-            # Parse JSON and escape any issues
-            credentials_info = json.loads(credentials_json)
-            
-            # Initialize BigQuery client
-            credentials = service_account.Credentials.from_service_account_info(credentials_info)
-            self._client = bigquery.Client(credentials=credentials, project=credentials_info["project_id"])
-            st.success("BigQuery client initialized successfully!")
-        except json.JSONDecodeError as e:
-            st.error(f"Failed to parse credentials JSON. Please check the format: {str(e)}")
-            self._client = None
-        except Exception as e:
-            st.error(f"Failed to initialize BigQuery client: {str(e)}")
-            self._client = None
-
+        self._client = client
 
     def _run(self, query: str) -> str:
         """Execute the tool's main functionality."""
@@ -106,10 +53,7 @@ class GoogleBigQueryTool(BaseTool):
             df = self._execute_query(query)
             if df.empty:
                 return "No results found for the given keyword."
-
-            # Convert DataFrame to JSON for structured output
-            results = df.to_dict(orient="records")
-            return json.dumps(results, ensure_ascii=False)
+            return df.to_json(orient="records")
         except Exception as e:
             return f"Error executing query: {str(e)}"
 
@@ -138,7 +82,7 @@ class GoogleBigQueryTool(BaseTool):
             df = self._client.query(query, job_config=job_config).result().to_dataframe()
             return df
         except Exception as e:
-            st.error(f"Query execution error: {str(e)}")
+            st.error(f"Query execution error: {e}")
             return pd.DataFrame()
 
     def execute_query(self, keyword: str) -> pd.DataFrame:
@@ -146,11 +90,11 @@ class GoogleBigQueryTool(BaseTool):
         return self._execute_query(keyword)
 
 class KeywordPlannerAgent:
-    def __init__(self, gemini_api_key):
-        """Initialize Keyword Planner agents"""
+    def __init__(self, gemini_api_key, bigquery_client):
+        """Initialize Keyword Planner agents."""
         self.llm = LLM(model="gemini/gemini-1.5-pro-latest", 
                        api_key=gemini_api_key)
-        self.bigquery_tool = GoogleBigQueryTool()
+        self.bigquery_tool = GoogleBigQueryTool(bigquery_client)
 
         self.keyword_researcher = Agent(
             role="Keyword Research Specialist",
@@ -160,20 +104,6 @@ class KeywordPlannerAgent:
                 - Analyzing search volumes and competition metrics
                 - Identifying valuable keyword opportunities
                 - Understanding search intent and user behavior
-                """),
-            tools=[self.bigquery_tool],
-            llm=self.llm,
-            verbose=True
-        )
-        
-        self.competition_analyst = Agent(
-            role="Competition Analyst",
-            goal="Analyze competition levels and difficulty for keywords",
-            backstory=dedent("""
-                You're an expert in competitive analysis with skills in:
-                - Evaluating keyword difficulty and competition
-                - Identifying market gaps and opportunities
-                - Providing strategic insights for keyword targeting
                 """),
             tools=[self.bigquery_tool],
             llm=self.llm,
@@ -195,23 +125,8 @@ class KeywordPlannerAgent:
             agent=self.keyword_researcher
         )
 
-    def create_competition_task(self, query_input: str) -> Task:
-        return Task(
-            description=dedent(f"""
-                Analyze competition levels for keywords related to: {query_input}
-                
-                Steps:
-                1. Evaluate competition metrics from BigQuery
-                2. Assess difficulty levels for each keyword
-                3. Identify low-competition opportunities
-                4. Provide strategic recommendations
-                """),
-            expected_output="Competition analysis with strategic insights",
-            agent=self.competition_analyst
-        )
-
 def run_keywordplanner_agent():
-    """Main function to run the Keyword Planner interface"""
+    """Main function to run the Keyword Planner interface."""
     
     st.title("🔍 Keyword Planner")
     st.write("Analyze keywords and develop content strategies using AI-powered analysis.")
@@ -230,20 +145,17 @@ def run_keywordplanner_agent():
             "Enter Keyword or Topic",
             help="Enter your main keyword or topic to analyze"
         )
-        
-        analyze_button = st.form_submit_button(
-            "Analyze Keywords",
-            type="primary",
-            use_container_width=True
-        )
+        analyze_button = st.form_submit_button("Analyze Keywords")
 
     if analyze_button and keyword_input:
+        # Initialize BigQuery client
+        client = initialize_bigquery_client()
+        if not client:
+            return
+
         try:
-            with st.spinner('Analyzing keywords... Please wait.'):
-                # Initialize agent with Gemini API key
-                planner = KeywordPlannerAgent(st.secrets["GEMINI_API_KEY"])
-                
-                # Get keyword data
+            with st.spinner("Analyzing keywords... Please wait."):
+                planner = KeywordPlannerAgent(st.secrets["GEMINI_API_KEY"], client)
                 df = planner.bigquery_tool.execute_query(keyword_input)
                 
                 if df.empty:
@@ -252,32 +164,7 @@ def run_keywordplanner_agent():
 
                 # Display results
                 st.subheader("Keyword Analysis Results")
-                
-                # Format the DataFrame for display
-                display_df = df.copy()
-                display_df["avg_monthly_searches"] = display_df["avg_monthly_searches"].apply(
-                    lambda x: "{:,}".format(int(x)) if pd.notnull(x) else x
-                )
-                
-                # Create competition mapping
-                competition_map = {
-                    'HIGH': 'สูง',
-                    'MEDIUM': 'ปานกลาง',
-                    'LOW': 'ต่ำ'
-                }
-                display_df['competition'] = display_df['competition'].map(competition_map).fillna('ไม่ระบุ')
-                
-                # Display data table
-                st.dataframe(
-                    display_df,
-                    column_config={
-                        "keyword": st.column_config.TextColumn("Keyword", width="medium"),
-                        "avg_monthly_searches": st.column_config.TextColumn("Monthly Searches", width="small"),
-                        "competition": st.column_config.TextColumn("Competition", width="small")
-                    },
-                    hide_index=True,
-                    use_container_width=True
-                )
+                st.dataframe(df, use_container_width=True)
 
                 # Create visualization for top keywords
                 st.subheader("Top Keywords by Search Volume")
@@ -291,27 +178,8 @@ def run_keywordplanner_agent():
                 fig.update_layout(xaxis_tickangle=-45, height=500)
                 st.plotly_chart(fig, use_container_width=True)
 
-                # Store analysis in session state
-                st.session_state.kw_messages.append({
-                    "keyword": keyword_input,
-                    "data": display_df.to_dict('records')
-                })
-
         except Exception as e:
-            st.error(f"An error occurred during analysis: {str(e)}")
-            if st.checkbox("Show error details"):
-                st.exception(e)
-
-    # Display analysis history
-    if st.session_state.kw_messages:
-        st.subheader("Previous Analysis Results")
-        for analysis in st.session_state.kw_messages[-5:]:  # Show last 5 analyses
-            with st.expander(f"Analysis for: {analysis['keyword']}"):
-                st.dataframe(
-                    pd.DataFrame(analysis['data']),
-                    hide_index=True,
-                    use_container_width=True
-                )
+            st.error(f"An error occurred during analysis: {e}")
 
 if __name__ == "__main__":
     run_keywordplanner_agent()
