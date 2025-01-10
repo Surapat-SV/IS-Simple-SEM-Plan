@@ -40,7 +40,7 @@ class BusinessAnalystChatbot:
     def __init__(self):
         self.current_question_index = 0
 
-        def get_next_question(self):
+    def get_next_question(self):
         # Use the current_question_index from session_state instead
         if st.session_state["current_question_index"] < len(self.QUESTIONS):
             question = self.QUESTIONS[st.session_state["current_question_index"]]
