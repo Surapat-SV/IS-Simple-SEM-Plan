@@ -41,11 +41,11 @@ class BusinessAnalystChatbot:
         self.current_question_index = 0
 
     def get_next_question(self):
-        if self.current_question_index < len(self.QUESTIONS):
-            question = self.QUESTIONS[self.current_question_index]
-            self.current_question_index += 1
-            return question
-        return None
+    # Use the current_question_index from session_state instead
+    if st.session_state["current_question_index"] < len(self.QUESTIONS):
+        question = self.QUESTIONS[st.session_state["current_question_index"]]
+        return question
+    return None
 
     @staticmethod
     def create_agent():
@@ -95,17 +95,23 @@ def run_business_analyst_chatbot():
         st.session_state["messages"].append({"role": "user", "content": user_input})
         st.chat_message("user").write(user_input)
 
-        # Save user response to context
+        # Save user response and increment question index
         current_question_index = st.session_state["current_question_index"]
-        question_key = f"question_{current_question_index}"
-        st.session_state["context"][question_key] = user_input
+        st.session_state["context"][BusinessAnalystChatbot.QUESTIONS[current_question_index]] = user_input
+        st.session_state["current_question_index"] += 1  # Increment index after saving response
 
-        # Get next question
-        next_question = chatbot.get_next_question()
-        if next_question:
+        # Get next question only if there are more questions
+        if st.session_state["current_question_index"] < len(BusinessAnalystChatbot.QUESTIONS):
+            next_question = BusinessAnalystChatbot.QUESTIONS[st.session_state["current_question_index"]]
             st.session_state["messages"].append({"role": "assistant", "content": next_question})
             st.chat_message("assistant").write(next_question)
         else:
+            # Handle completion of all questions
+            summary = "Thank you for all your responses! Here's a summary:\n"
+            for q, a in st.session_state["context"].items():
+                summary += f"\n{q}\nAnswer: {a}\n"
+            st.session_state["messages"].append({"role": "assistant", "content": summary})
+            st.chat_message("assistant").write(summary)
             # Create agent and task
             agent = chatbot.create_agent()
             task = chatbot.create_task(agent, st.session_state["context"])
