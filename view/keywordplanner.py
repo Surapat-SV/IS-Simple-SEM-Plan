@@ -24,9 +24,8 @@ class KeywordQueryInput(BaseModel):
 
 class BigQueryKeywordTool(BaseTool):
     """Tool for querying keyword data from BigQuery"""
-    name: str = "BigQuery Keyword Data Tool"
-    description: str = "Fetches keyword data from BigQuery database with monthly searches and competition data"
-    args_schema: KeywordQueryInput = KeywordQueryInput
+    name = "BigQuery Keyword Data Tool"
+    description = "Fetches keyword data from BigQuery database with monthly searches and competition data"
 
     def __init__(self) -> None:
         super().__init__()
@@ -41,23 +40,15 @@ class BigQueryKeywordTool(BaseTool):
             st.error(f"Failed to initialize BigQuery client: {str(e)}")
             self._client = None
 
-    def _run(self, keyword: str) -> str:
+    def _run(self, query: str) -> str:
         """Execute the tool's main functionality"""
         try:
-            df = self._execute_query(keyword)
+            df = self._execute_query(query)
             if df.empty:
                 return "No results found for the given keyword."
             
-            # Convert DataFrame to list of KeywordData
-            results = []
-            for _, row in df.iterrows():
-                keyword_data = KeywordData(
-                    keyword=row['keyword'],
-                    avg_monthly_searches=row['avg_monthly_searches'],
-                    competition=row['competition']
-                )
-                results.append(keyword_data.model_dump())
-            
+            # Convert DataFrame to list of dictionaries
+            results = df.to_dict('records')
             return json.dumps(results, ensure_ascii=False)
         except Exception as e:
             return f"Error executing query: {str(e)}"
