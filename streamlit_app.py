@@ -12,7 +12,7 @@ from google.oauth2 import service_account
 from crewai_tools import SerperDevTool
 
 # Import views
-from views.business_analyst import run_businessanalyst
+from views.businessanalyst import run_businessanalyst
 from views.webanalyst import run_webanalyst
 from views.keywordplanner import run_keywordplanner_agent
 from views.adcopy import run_adcopy
