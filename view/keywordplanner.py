@@ -19,20 +19,31 @@ class GoogleBigQueryTool(BaseTool):
         )
         try:
             # Get credentials from Streamlit secrets
-            credentials_info = st.secrets["general"]["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
-            # Handle the credentials whether they're a string or dict
-            if isinstance(credentials_info, str):
-                try:
-                    credentials_info = json.loads(credentials_info)
-                except json.JSONDecodeError:
-                    # If it's already a JSON string but has escaping issues
-                    credentials_info = eval(credentials_info)
+            credentials_json = st.secrets["general"]["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
             
-            credentials = service_account.Credentials.from_service_account_info(credentials_info)
-            self._client = bigquery.Client(
-                credentials=credentials,
-                project=credentials_info["project_id"]
-            )
+            # Clean and parse the credentials
+            try:
+                # If it's already a dictionary, use it directly
+                if isinstance(credentials_json, dict):
+                    credentials_info = credentials_json
+                else:
+                    # Clean up the string - handle triple-quoted string format
+                    credentials_json = credentials_json.strip()
+                    # Parse JSON
+                    credentials_info = json.loads(credentials_json)
+
+                # Create credentials and client
+                credentials = service_account.Credentials.from_service_account_info(credentials_info)
+                self._client = bigquery.Client(
+                    credentials=credentials,
+                    project=credentials_info["project_id"]
+                )
+                st.success("BigQuery client initialized successfully!")
+                
+            except Exception as e:
+                st.error(f"Failed to initialize credentials: {str(e)}")
+                if st.checkbox("Show credentials debug info"):
+                    st.write("Credentials type:", type(credentials_json))
         except Exception as e:
             st.error(f"Failed to initialize BigQuery client: {str(e)}")
             self._client = None
