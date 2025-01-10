@@ -9,43 +9,62 @@ import pandas as pd
 from textwrap import dedent
 import plotly.express as px
 import json
-from typing import Optional
+from typing import Optional, Dict, Any, List
+from pydantic import BaseModel, Field
+
+class KeywordData(BaseModel):
+    """Schema for keyword data"""
+    keyword: str = Field(description="The keyword string")
+    avg_monthly_searches: int = Field(description="Average monthly search volume")
+    competition: str = Field(description="Competition level (HIGH, MEDIUM, LOW)")
+
+class KeywordQueryInput(BaseModel):
+    """Schema for keyword query input"""
+    keyword: str = Field(description="Keyword to search for")
 
 class BigQueryKeywordTool(BaseTool):
+    """Tool for querying keyword data from BigQuery"""
     name: str = "BigQuery Keyword Data Tool"
     description: str = "Fetches keyword data from BigQuery database with monthly searches and competition data"
-    client: Optional[bigquery.Client] = None
-    
-    def __init__(self):
-        """Initialize BigQuery tool with project credentials"""
+    args_schema: KeywordQueryInput = KeywordQueryInput
+
+    def __init__(self) -> None:
         super().__init__()
         try:
-            # Get credentials from Streamlit secrets
             credentials_info = json.loads(st.secrets["general"]["GOOGLE_APPLICATION_CREDENTIALS_JSON"])
             credentials = service_account.Credentials.from_service_account_info(credentials_info)
-            
-            # Initialize BigQuery client
-            self.client = bigquery.Client(
+            self._client = bigquery.Client(
                 credentials=credentials,
                 project=credentials_info["project_id"]
             )
         except Exception as e:
             st.error(f"Failed to initialize BigQuery client: {str(e)}")
-            self.client = None
+            self._client = None
 
     def _run(self, keyword: str) -> str:
         """Execute the tool's main functionality"""
         try:
-            df = self.execute_query(keyword)
+            df = self._execute_query(keyword)
             if df.empty:
                 return "No results found for the given keyword."
-            return df.to_string()
+            
+            # Convert DataFrame to list of KeywordData
+            results = []
+            for _, row in df.iterrows():
+                keyword_data = KeywordData(
+                    keyword=row['keyword'],
+                    avg_monthly_searches=row['avg_monthly_searches'],
+                    competition=row['competition']
+                )
+                results.append(keyword_data.model_dump())
+            
+            return json.dumps(results, ensure_ascii=False)
         except Exception as e:
             return f"Error executing query: {str(e)}"
 
-    def execute_query(self, keyword: str) -> pd.DataFrame:
+    def _execute_query(self, keyword: str) -> pd.DataFrame:
         """Execute BigQuery query with proper parameter handling"""
-        if not self.client:
+        if not self._client:
             raise Exception("BigQuery client not initialized")
 
         try:
@@ -68,11 +87,16 @@ class BigQueryKeywordTool(BaseTool):
                 ]
             )
             
-            return self.client.query(query, job_config=job_config).result().to_dataframe()
+            df = self._client.query(query, job_config=job_config).result().to_dataframe()
+            return df
             
         except Exception as e:
             st.error(f"Query execution error: {str(e)}")
             return pd.DataFrame()
+
+    def execute_query(self, keyword: str) -> pd.DataFrame:
+        """Public method for executing queries (used by the Streamlit interface)"""
+        return self._execute_query(keyword)
 
 class KeywordPlannerAgent:
     def __init__(self, gemini_api_key):
