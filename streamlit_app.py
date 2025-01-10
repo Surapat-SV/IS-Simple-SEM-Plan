@@ -166,7 +166,7 @@ with st.sidebar:
 # Main app routing
 try:
     if selected == "Business Analyst":
-        run_businessanalyst()
+        run_business_analyst_chatbot()
     elif selected == "Web Analyst":
         run_webanalyst()
     elif selected == "Keyword Planner":
