@@ -19,7 +19,15 @@ class GoogleBigQueryTool(BaseTool):
         )
         try:
             # Get credentials from Streamlit secrets
-            credentials_info = json.loads(st.secrets["general"]["GOOGLE_APPLICATION_CREDENTIALS_JSON"])
+            credentials_info = st.secrets["general"]["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
+            # Handle the credentials whether they're a string or dict
+            if isinstance(credentials_info, str):
+                try:
+                    credentials_info = json.loads(credentials_info)
+                except json.JSONDecodeError:
+                    # If it's already a JSON string but has escaping issues
+                    credentials_info = eval(credentials_info)
+            
             credentials = service_account.Credentials.from_service_account_info(credentials_info)
             self._client = bigquery.Client(
                 credentials=credentials,
