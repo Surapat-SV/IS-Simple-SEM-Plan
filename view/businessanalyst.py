@@ -59,14 +59,15 @@ class BusinessAnalystChatbot:
 
     @staticmethod
     def create_task(agent, context):
-    # Convert dictionary to a list of key-value pairs
-    context_as_list = [{"question": key, "answer": value} for key, value in context.items()]
+        # Convert dictionary to a list of key-value pairs
+        context_as_list = [{"question": key, "answer": value} for key, value in context.items()]
         return Task(
             description="Engage in a structured conversation to collect business details.",
             agent=agent,
             expected_output="Detailed business information in JSON format.",
             context=context_as_list  # Pass the list to the context
         )
+
 def run_business_analyst_chatbot():
     st.title("Business Analyst Chatbot")
 
