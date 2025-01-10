@@ -59,13 +59,14 @@ class BusinessAnalystChatbot:
 
     @staticmethod
     def create_task(agent, context):
-        return Task(
-            description="Engage in a structured conversation to collect business details.",
-            agent=agent,
-            expected_output="Detailed business information in JSON format.",
-            context=context
-        )
-
+    # Convert dictionary to a list of key-value pairs
+    context_as_list = [{"question": key, "answer": value} for key, value in context.items()]
+    return Task(
+        description="Engage in a structured conversation to collect business details.",
+        agent=agent,
+        expected_output="Detailed business information in JSON format.",
+        context=context_as_list  # Pass the list to the context
+    )
 def run_business_analyst_chatbot():
     st.title("Business Analyst Chatbot")
 
@@ -94,12 +95,12 @@ def run_business_analyst_chatbot():
     if user_input:
         st.session_state["messages"].append({"role": "user", "content": user_input})
         st.chat_message("user").write(user_input)
-
+    
         # Save user response and increment question index
         current_question_index = st.session_state["current_question_index"]
         st.session_state["context"][BusinessAnalystChatbot.QUESTIONS[current_question_index]] = user_input
         st.session_state["current_question_index"] += 1  # Increment index after saving response
-
+    
         # Get next question only if there are more questions
         if st.session_state["current_question_index"] < len(BusinessAnalystChatbot.QUESTIONS):
             next_question = BusinessAnalystChatbot.QUESTIONS[st.session_state["current_question_index"]]
@@ -112,16 +113,17 @@ def run_business_analyst_chatbot():
                 summary += f"\n{q}\nAnswer: {a}\n"
             st.session_state["messages"].append({"role": "assistant", "content": summary})
             st.chat_message("assistant").write(summary)
+            
             # Create agent and task
             agent = chatbot.create_agent()
             task = chatbot.create_task(agent, st.session_state["context"])
-
+    
             # Create crew and execute task
             try:
                 handler = StreamlitCallbackHandler("Business Analyst")
                 crew = Crew(agents=[agent], tasks=[task], verbose=True, callbacks=[handler], process=Process.sequential)
                 result = crew.kickoff()
-
+    
                 # Append result to messages
                 final_output = result["output"] if isinstance(result, dict) and "output" in result else "Thank you for your responses!"
                 st.session_state["messages"].append({"role": "assistant", "content": final_output})
@@ -129,6 +131,7 @@ def run_business_analyst_chatbot():
             except Exception as e:
                 st.session_state["messages"].append({"role": "assistant", "content": f"An error occurred: {str(e)}"})
                 st.chat_message("assistant").write(f"An error occurred: {str(e)}")
+
 
     # Clear chat history button
     if st.button("Clear Chat History"):
