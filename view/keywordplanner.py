@@ -72,6 +72,7 @@ def initialize_credentials():
     except KeyError as e:
         st.error(f"Missing required key in secrets: {str(e)}")
         return None
+
 class GoogleBigQueryTool(BaseTool):
     def __init__(self):
         super().__init__(
@@ -79,27 +80,23 @@ class GoogleBigQueryTool(BaseTool):
             description="Fetches keyword data from BigQuery database with monthly searches and competition data",
         )
         try:
-            # Check for uploaded credentials or Streamlit secrets
-            if "GOOGLE_APPLICATION_CREDENTIALS_JSON" in st.secrets.get("general", {}):
-                credentials_json = st.secrets["general"]["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
-                # Parse credentials JSON
-                credentials_info = json.loads(credentials_json)
-            else:
-                st.error("No credentials found. Please upload your credentials file.")
-                raise Exception("Missing credentials.")
-
-            # Set up Google credentials and BigQuery client
+            # Fetch credentials from Streamlit secrets
+            credentials_json = st.secrets["general"]["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
+            
+            # Parse JSON and escape any issues
+            credentials_info = json.loads(credentials_json)
+            
+            # Initialize BigQuery client
             credentials = service_account.Credentials.from_service_account_info(credentials_info)
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = tempfile.NamedTemporaryFile(delete=False, suffix=".json").name
-
-            with open(os.environ["GOOGLE_APPLICATION_CREDENTIALS"], "w") as temp_file:
-                json.dump(credentials_info, temp_file)
-
             self._client = bigquery.Client(credentials=credentials, project=credentials_info["project_id"])
             st.success("BigQuery client initialized successfully!")
+        except json.JSONDecodeError as e:
+            st.error(f"Failed to parse credentials JSON. Please check the format: {str(e)}")
+            self._client = None
         except Exception as e:
             st.error(f"Failed to initialize BigQuery client: {str(e)}")
             self._client = None
+
 
     def _run(self, query: str) -> str:
         """Execute the tool's main functionality."""
