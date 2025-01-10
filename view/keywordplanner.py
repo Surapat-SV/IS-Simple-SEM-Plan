@@ -20,62 +20,47 @@ class GoogleBigQueryTool(BaseTool):
             description="Fetches keyword data from BigQuery database with monthly searches and competition data",
         )
         try:
-            # Get credentials from Streamlit secrets
-            credentials_json = st.secrets["general"]["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
-            
-            # Clean and parse the credentials
-            try:
-                # If it's already a dictionary, use it directly
-                if isinstance(credentials_json, dict):
-                    credentials_info = credentials_json
-                else:
-                    # Clean up the string - handle triple-quoted string format
-                    credentials_json = credentials_json.strip()
-                    credentials_json = credentials_json.replace("\n", "\\n")  # Escape invalid characters
-                    credentials_info = json.loads(credentials_json)
+            # Check for uploaded credentials or Streamlit secrets
+            if "GOOGLE_APPLICATION_CREDENTIALS_JSON" in st.secrets.get("general", {}):
+                credentials_json = st.secrets["general"]["GOOGLE_APPLICATION_CREDENTIALS_JSON"]
+                # Parse credentials JSON
+                credentials_info = json.loads(credentials_json)
+            else:
+                st.error("No credentials found. Please upload your credentials file.")
+                raise Exception("Missing credentials.")
 
-                # Create credentials and client
-                credentials = service_account.Credentials.from_service_account_info(credentials_info)
-                self._client = bigquery.Client(
-                    credentials=credentials,
-                    project=credentials_info["project_id"]
-                )
-                st.success("BigQuery client initialized successfully!")
-                
-            except json.JSONDecodeError as e:
-                st.error(f"Failed to parse credentials JSON: {str(e)}")
-                if st.checkbox("Show credentials debug info"):
-                    st.write(credentials_json)
-                self._client = None
-            except Exception as e:
-                st.error(f"Failed to initialize credentials: {str(e)}")
-                if st.checkbox("Show credentials debug info"):
-                    st.write("Credentials type:", type(credentials_json))
-                self._client = None
+            # Set up Google credentials and BigQuery client
+            credentials = service_account.Credentials.from_service_account_info(credentials_info)
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = tempfile.NamedTemporaryFile(delete=False, suffix=".json").name
+
+            with open(os.environ["GOOGLE_APPLICATION_CREDENTIALS"], "w") as temp_file:
+                json.dump(credentials_info, temp_file)
+
+            self._client = bigquery.Client(credentials=credentials, project=credentials_info["project_id"])
+            st.success("BigQuery client initialized successfully!")
         except Exception as e:
             st.error(f"Failed to initialize BigQuery client: {str(e)}")
             self._client = None
 
     def _run(self, query: str) -> str:
-        """Execute the tool's main functionality"""
+        """Execute the tool's main functionality."""
         if not self._client:
             return "BigQuery client not initialized."
         try:
             df = self._execute_query(query)
             if df.empty:
                 return "No results found for the given keyword."
-            
-            # Convert DataFrame to list of dictionaries
-            results = df.to_dict('records')
+
+            # Convert DataFrame to JSON for structured output
+            results = df.to_dict(orient="records")
             return json.dumps(results, ensure_ascii=False)
         except Exception as e:
             return f"Error executing query: {str(e)}"
 
     def _execute_query(self, keyword: str) -> pd.DataFrame:
-        """Execute BigQuery query with proper parameter handling"""
+        """Execute BigQuery query with proper parameter handling."""
         if not self._client:
-            raise Exception("BigQuery client not initialized")
-
+            raise Exception("BigQuery client not initialized.")
         try:
             query = """
             SELECT
@@ -89,22 +74,19 @@ class GoogleBigQueryTool(BaseTool):
             ORDER BY avg_monthly_searches DESC
             LIMIT 100
             """
-            
             job_config = bigquery.QueryJobConfig(
                 query_parameters=[
                     bigquery.ScalarQueryParameter("keyword_pattern", "STRING", f"%{keyword}%"),
                 ]
             )
-            
             df = self._client.query(query, job_config=job_config).result().to_dataframe()
             return df
-            
         except Exception as e:
             st.error(f"Query execution error: {str(e)}")
             return pd.DataFrame()
 
     def execute_query(self, keyword: str) -> pd.DataFrame:
-        """Public method for executing queries (used by the Streamlit interface)"""
+        """Public method for executing queries."""
         return self._execute_query(keyword)
 
 class KeywordPlannerAgent:
