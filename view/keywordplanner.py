@@ -10,6 +10,8 @@ from textwrap import dedent
 import plotly.express as px
 import json
 from typing import Optional
+import os
+import tempfile
 
 class GoogleBigQueryTool(BaseTool):
     def __init__(self):
