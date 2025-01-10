@@ -1,35 +1,24 @@
 # view/keywordplanner.py
 
+import streamlit as st
 from crewai import Agent, Task, Crew, Process, LLM
 from crewai.tools import BaseTool
 from google.cloud import bigquery
 from google.oauth2 import service_account
-import streamlit as st
 import pandas as pd
 from textwrap import dedent
 import plotly.express as px
 import json
-from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field
+from typing import Optional
 
-class KeywordData(BaseModel):
-    """Schema for keyword data"""
-    keyword: str = Field(description="The keyword string")
-    avg_monthly_searches: int = Field(description="Average monthly search volume")
-    competition: str = Field(description="Competition level (HIGH, MEDIUM, LOW)")
-
-class KeywordQueryInput(BaseModel):
-    """Schema for keyword query input"""
-    keyword: str = Field(description="Keyword to search for")
-
-class BigQueryKeywordTool(BaseTool):
-    """Tool for querying keyword data from BigQuery"""
-    name = "BigQuery Keyword Data Tool"
-    description = "Fetches keyword data from BigQuery database with monthly searches and competition data"
-
-    def __init__(self) -> None:
-        super().__init__()
+class GoogleBigQueryTool(BaseTool):
+    def __init__(self):
+        super().__init__(
+            name="Google BigQuery Keyword Tool",
+            description="Fetches keyword data from BigQuery database with monthly searches and competition data",
+        )
         try:
+            # Get credentials from Streamlit secrets
             credentials_info = json.loads(st.secrets["general"]["GOOGLE_APPLICATION_CREDENTIALS_JSON"])
             credentials = service_account.Credentials.from_service_account_info(credentials_info)
             self._client = bigquery.Client(
@@ -94,7 +83,7 @@ class KeywordPlannerAgent:
         """Initialize Keyword Planner agents"""
         self.llm = LLM(model="gemini/gemini-1.5-pro-latest", 
                        api_key=gemini_api_key)
-        self.bigquery_tool = BigQueryKeywordTool()
+        self.bigquery_tool = GoogleBigQueryTool()
 
         self.keyword_researcher = Agent(
             role="Keyword Research Specialist",
