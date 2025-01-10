@@ -47,6 +47,25 @@ class BusinessAnalystChatbot:
             return question
         return None
 
+    @staticmethod
+    def create_agent():
+        return Agent(
+            role="Business Analyst",
+            goal="Assist in collecting detailed business information through structured conversation.",
+            backstory="An experienced business analyst skilled in gathering and structuring business data for strategic purposes.",
+            verbose=True,
+            allow_delegation=False
+        )
+
+    @staticmethod
+    def create_task(agent, context):
+        return Task(
+            description="Engage in a structured conversation to collect business details.",
+            agent=agent,
+            expected_output="Detailed business information in JSON format.",
+            context=context
+        )
+
 def run_business_analyst_chatbot():
     st.title("Business Analyst Chatbot")
 
@@ -90,8 +109,23 @@ def run_business_analyst_chatbot():
             st.session_state["messages"].append({"role": "assistant", "content": next_question})
             st.chat_message("assistant").write(next_question)
         else:
-            st.session_state["messages"].append({"role": "assistant", "content": "Thank you for your responses!"})
-            st.chat_message("assistant").write("Thank you for your responses!")
+            # Create agent and task
+            agent = chatbot.create_agent()
+            task = chatbot.create_task(agent, st.session_state["context"])
+
+            # Create crew and execute task
+            try:
+                handler = StreamlitCallbackHandler("Business Analyst")
+                crew = Crew(agents=[agent], tasks=[task], verbose=True, callbacks=[handler], process=Process.sequential)
+                result = crew.kickoff()
+
+                # Append result to messages
+                final_output = result["output"] if isinstance(result, dict) and "output" in result else "Thank you for your responses!"
+                st.session_state["messages"].append({"role": "assistant", "content": final_output})
+                st.chat_message("assistant").write(final_output)
+            except Exception as e:
+                st.session_state["messages"].append({"role": "assistant", "content": f"An error occurred: {str(e)}"})
+                st.chat_message("assistant").write(f"An error occurred: {str(e)}")
 
     # Clear chat history button
     if st.button("Clear Chat History"):
