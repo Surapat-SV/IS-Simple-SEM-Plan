@@ -4,8 +4,8 @@ sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
 import streamlit as st
 from crewai import Agent, Task, Crew, Process, LLM
+from crewai_tools import SerperDevTool
 from dotenv import load_dotenv
-import json
 import uuid
 
 # Load environment variables
@@ -28,45 +28,8 @@ class StreamlitCallbackHandler:
             st.session_state["messages"].append({"role": self.agent_name, "content": message})
         st.chat_message(self.agent_name).write(message)
 
-class BusinessResearcher:
-    """Class to handle business questions"""
-    def __init__(self):
-        self.gemini_api_key = st.secrets['GEMINI_API_KEY']
-        self.llm = LLM(
-            model="gemini/gemini-1.5-pro-latest",
-            api_key=self.gemini_api_key,
-            temperature=0
-        )
-
-    def create_question_agent(self):
-        return Agent(
-            role="Business Questioner",
-            goal="Ask structured questions to gather business information from the user one by one.",
-            backstory="An experienced business analyst that excels in gathering detailed business information through questions.",
-            allow_delegation=False,
-            llm=self.llm
-        )
-
-    def create_question_task(self, agent, question):
-        return Task(
-            description=f"Ask the user: {question}",
-            expected_output=f"The user's response to the question: {question}",
-            agent=agent
-        )
-
-def run_businessanalyst():
-    """Run the Business Analyst chatbot to ask 5 structured questions one by one"""
-    st.title("Business Analyst Chatbot")
-
-    # Initialize session state
-    if "messages" not in st.session_state:
-        st.session_state["messages"] = []
-    if "current_question" not in st.session_state:
-        st.session_state["current_question"] = 0
-    if "responses" not in st.session_state:
-        st.session_state["responses"] = {}
-
-    questions = [
+class BusinessAnalystChatbot:
+    QUESTIONS = [
         "What is the name of your business?",
         "What products or services do you offer?",
         "Who is your target audience?",
@@ -74,34 +37,61 @@ def run_businessanalyst():
         "What are your key marketing goals?"
     ]
 
+    def __init__(self):
+        self.current_question_index = 0
+
+    def get_next_question(self):
+        if self.current_question_index < len(self.QUESTIONS):
+            question = self.QUESTIONS[self.current_question_index]
+            self.current_question_index += 1
+            return question
+        return None
+
+def run_business_analyst_chatbot():
+    st.title("Business Analyst Chatbot")
+
+    # Initialize session state
+    if "messages" not in st.session_state:
+        st.session_state["messages"] = []
+    if "context" not in st.session_state:
+        st.session_state["context"] = {}
+    if "thread_id" not in st.session_state:
+        st.session_state["thread_id"] = str(uuid.uuid4())
+    if "current_question_index" not in st.session_state:
+        st.session_state["current_question_index"] = 0
+
+    chatbot = BusinessAnalystChatbot()
+
+    # Greeting
+    if not st.session_state["messages"]:
+        greeting = "Hello! I'm here to assist you with your business. Let's get started!"
+        st.session_state["messages"].append({"role": "assistant", "content": greeting})
+        st.chat_message("assistant").write(greeting)
+
     # Display chat history
     for msg in st.session_state["messages"]:
         avatar = "👤" if msg["role"] == "user" else "🤖"
         st.chat_message(msg["role"], avatar=avatar).write(msg["content"])
 
-    # Check if all questions have been answered
-    if st.session_state["current_question"] < len(questions):
-        current_question = questions[st.session_state["current_question"]]
+    # User input
+    user_input = st.chat_input(placeholder="Your answer here...")
+    if user_input:
+        st.session_state["messages"].append({"role": "user", "content": user_input})
+        st.chat_message("user").write(user_input)
 
-        # Ask the current question
-        st.chat_message("assistant").write(current_question)
+        # Save user response to context
+        current_question_index = st.session_state["current_question_index"]
+        question_key = f"question_{current_question_index}"
+        st.session_state["context"][question_key] = user_input
 
-        # User input
-        user_input = st.chat_input(placeholder="Type your answer here...")
-        if user_input:
-            # Save the user's response
-            st.session_state["responses"][current_question] = user_input
-            st.session_state["messages"].append({"role": "user", "content": user_input})
-            st.chat_message("user").write(user_input)
-
-            # Move to the next question
-            st.session_state["current_question"] += 1
-
-    else:
-        # Display all collected responses
-        st.subheader("Collected Business Information")
-        for question, response in st.session_state["responses"].items():
-            st.write(f"**{question}**: {response}")
+        # Get next question
+        next_question = chatbot.get_next_question()
+        if next_question:
+            st.session_state["messages"].append({"role": "assistant", "content": next_question})
+            st.chat_message("assistant").write(next_question)
+        else:
+            st.session_state["messages"].append({"role": "assistant", "content": "Thank you for your responses!"})
+            st.chat_message("assistant").write("Thank you for your responses!")
 
     # Clear chat history button
     if st.button("Clear Chat History"):
@@ -109,4 +99,4 @@ def run_businessanalyst():
         st.rerun()
 
 if __name__ == "__main__":
-    run_businessanalyst()
+    run_business_analyst_chatbot()
