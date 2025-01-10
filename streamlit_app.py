@@ -119,7 +119,7 @@ st.markdown("""
 # Sidebar configuration
 with st.sidebar:
     st.title("SEM Planner")
-    st.image("https://via.placeholder.com/150", width=150)  # Replace with your logo
+
     
     st.info("""
         Plan and Optimize SEM Campaigns:
