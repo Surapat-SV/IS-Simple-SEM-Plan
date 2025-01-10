@@ -1,0 +1,17 @@
+streamlit
+streamlit_option_menu
+crewai
+crewai_tools
+langchain_community
+pysqlite3-binary
+pythainlp
+scikit-learn
+google-cloud-storage
+google-auth
+google-auth-oauthlib
+matplotlib
+pydantic
+db-dtypes
+plotly
+python-dotenv
+numpy
