@@ -1,174 +1,205 @@
+# Ensure compatibility for SQLite in certain environments
 __import__('pysqlite3')
 import sys
 sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
-import json
-from crewai import Crew, Agent, Task
-from langchain_core.callbacks import BaseCallbackHandler
 import streamlit as st
-import uuid
+from crewai import Agent, Task, Crew, Process, LLM
+from crewai_tools import SerperDevTool, ScrapeWebsiteTool
+from dotenv import load_dotenv
+import json
+import pandas as pd
 
-class StreamlitCallbackHandler(BaseCallbackHandler):
-    def __init__(self, agent_name: str):
-        self.agent_name = agent_name
+# Load environment variables
+load_dotenv()
 
-    def on_chain_start(self, serialized, inputs, **kwargs):
-        # Show the input of the current chain in the chat
-        message = inputs.get("input", "Processing...")
-        if "messages" in st.session_state:
-            st.session_state["messages"].append({"role": self.agent_name, "content": message})
-        st.chat_message("assistant").write(message)
+def run_businessanalyst():
+    """Main function to run the Business Analyst tool and store results"""
+    
+    st.title("Business Research Tool")
+    st.markdown("Collect and analyze business information for further processing.")
 
-    def on_chain_end(self, outputs, **kwargs):
-        # Extract the natural language response from the output
-        if "tasks_output" in outputs and outputs["tasks_output"]:
-            task_output = outputs["tasks_output"][0]  # Assuming the first task is relevant
-            message = task_output.get("raw", "Completed")  # Extract the natural response
-        else:
-            message = outputs.get("output", "Completed")
-
-        if "messages" in st.session_state:
-            st.session_state["messages"].append({"role": self.agent_name, "content": message})
-        st.chat_message("assistant").write(message)
-
-
-class BusinessAnalystAgents:
-    @staticmethod
-    def conversational_business_analyst_agent():
-        return Agent(
-            role="Conversational Business Analyst",
-            goal="Gather business requirements through structured conversation",
-            backstory=(
-                "Expert Business Analyst skilled in requirement gathering. "
-                "Asks questions one at a time and builds upon previous answers."
-            ),
-            verbose=True,
-            memory=True,
-            allow_delegation=False
-        )
-
-class BusinessAnalystTasks:
-    def __init__(self):
-        self.questions = [
-            "What is the name of your business?",
-            "What products or services do you offer?",
-            "Who is your target audience?",
-            "What makes your product/service unique?",
-            "What are your key marketing goals?"
-        ]
+    # Input form
+    with st.form("business_research_form"):
+        col1, col2 = st.columns(2)
         
-    def get_current_question_index(self, context):
-        for i in range(len(self.questions)):
-            if f"answer_{i}" not in context:
-                return i
-        return len(self.questions)
+        with col1:
+            business_name = st.text_input("Business Name")
+            product_service = st.text_input("Product or Service")
 
-    def format_context_summary(self, context):
-        summary = {}
-        for i in range(len(self.questions)):
-            key = f"answer_{i}"
-            if key in context:
-                summary[self.questions[i]] = context[key]
-        return summary
-
-    def conversational_gathering_task(self, agent, context, user_input):
-        # Initialize or update context
-        if user_input and not context:
-            # First message - just store it and start questions
-            context["initial_message"] = user_input
-            current_index = 0
-        else:
-            # Get current question index
-            current_index = self.get_current_question_index(context)
-            # Store the answer for the previous question if applicable
-            if current_index > 0 and user_input:
-                prev_index = current_index - 1
-                context[f"answer_{prev_index}"] = user_input
-
-        # Check if we've completed all questions
-        if current_index >= len(self.questions):
-            summary = self.format_context_summary(context)
-            return Task(
-                description=f"""
-                All questions have been answered. Here's the summary:
-                {json.dumps(summary, indent=2)}
-                
-                Please provide a comprehensive summary and next steps.
-                """,
-                expected_output="Final summary and recommendations",
-                agent=agent
+        with col2:
+            website_url = st.text_input("Website URL")
+            industry = st.selectbox(
+                "Industry",
+                ["Technology", "E-commerce", "Healthcare", "Finance", 
+                 "Education", "Real Estate", "Manufacturing", "Other"]
             )
 
-        # Format context for current question
-        context_summary = self.format_context_summary(context)
-        context_str = json.dumps(context_summary, indent=2) if context_summary else "No previous answers yet"
+        target_audience_input = st.text_area(
+            "Target Audience Description",
+            height=100
+        )
 
+        submitted = st.form_submit_button("Research", type="primary", use_container_width=True)
+
+    if submitted and all([business_name, product_service, target_audience_input, website_url]):
+        with st.spinner('Collecting business information...'):
+            try:
+                # Initialize researcher
+                researcher = BusinessResearcher(
+                    business_name=business_name,
+                    product_service=product_service,
+                    target_audience=target_audience_input,
+                    website_url=website_url,
+                    industry=industry
+                )
+                
+                # Collect business data
+                research_data = researcher.collect_data()
+                
+                if research_data:
+                    # Store the JSON data in session state for later use
+                    st.session_state.business_research = research_data
+                    
+                    # Display the collected information
+                    display_research_results(research_data)
+                    
+                    # Show raw JSON for debugging/verification
+                    with st.expander("Raw Research Data (JSON)", expanded=False):
+                        st.code(json.dumps(research_data, indent=2), language='json')
+
+            except Exception as e:
+                st.error(f"Research error: {str(e)}")
+    elif submitted:
+        st.warning("Please fill in all required fields.")
+
+class BusinessResearcher:
+    """Class to handle business research and data collection"""
+    
+    def __init__(self, business_name, product_service, target_audience, website_url, industry):
+        self.business_name = business_name
+        self.product_service = product_service
+        self.target_audience = target_audience
+        self.website_url = website_url
+        self.industry = industry
+        self.serper_api_key = st.secrets['SERPER_API_KEY']
+        self.gemini_api_key = st.secrets['GEMINI_API_KEY']
+        self.llm = LLM(
+            model="gemini/gemini-1.5-pro-latest",
+            api_key=self.gemini_api_key,
+            temperature=0
+        )
+        self.search_tool = SerperDevTool(api_key=self.serper_api_key)
+        self.scrape_tool = ScrapeWebsiteTool()
+
+    def _create_researcher_agent(self):
+        """Create research agent"""
+        return Agent(
+            role="Business Researcher",
+            goal=f"Research and collect comprehensive data about {self.business_name}",
+            backstory="Expert in business research and data collection",
+            tools=[self.search_tool, self.scrape_tool],
+            allow_delegation=False,
+            llm=self.llm
+        )
+
+    def _create_research_task(self, agent):
+        """Create research task"""
         return Task(
             description=f"""
-            Current question to ask: {self.questions[current_index]}
-            
-            Previous context:
-            {context_str}
-            
-            Latest user input: {user_input if user_input else 'None'}
-            
-            Instructions:
-            1. If there was a previous answer, acknowledge it briefly
-            2. Ask the current question clearly and politely
-            3. Maintain a natural conversational flow
+            Research and collect data for {self.business_name}. 
+            Focus on gathering factual, verifiable information.
+
+            Business Details:
+            - Name: {self.business_name}
+            - Website: {self.website_url}
+            - Product/Service: {self.product_service}
+            - Target Audience: {self.target_audience}
+            - Industry: {self.industry}
+
+            Collect and structure the following information:
+            1. Basic company information
+            2. Product/service details
+            3. Target market information
+            4. Basic competitive position
+            5. Notable online presence details
+
+            Format all information in clear, concise text suitable for future analysis.
             """,
-            expected_output="Natural conversation gathering business requirements",
-            agent=agent
+            agent=agent,
+            expected_output="Comprehensive business data in structured format"
         )
 
-def run_business_analyst():
-    # Initialize session state
-    if "messages" not in st.session_state:
-        st.session_state["messages"] = []
-    if "context" not in st.session_state:
-        st.session_state["context"] = {}
-    if "thread_id" not in st.session_state:
-        st.session_state["thread_id"] = str(uuid.uuid4())
-
-    # Display chat history
-    for msg in st.session_state["messages"]:
-        avatar = "👤" if msg["role"] == "user" else "🤖"
-        st.chat_message(msg["role"], avatar=avatar).write(msg["content"])
-
-    # User input
-    user_input = st.chat_input(placeholder="Tell me about your business...")
-    if user_input:
-        # Append user input
-        st.session_state["messages"].append({"role": "user", "content": user_input})
-        st.chat_message("user").write(user_input)
-
+    def collect_data(self):
+        """Collect and structure business research data"""
         try:
-            # Initialize agent and task
-            agent = BusinessAnalystAgents.conversational_business_analyst_agent()
-            task = BusinessAnalystTasks().conversational_gathering_task(
-                agent,
-                st.session_state["context"],
-                user_input
-            )
-
-            # Create and execute crew
-            handler = StreamlitCallbackHandler("Business Analyst")
+            researcher = self._create_researcher_agent()
+            research_task = self._create_research_task(researcher)
+            
             crew = Crew(
-                agents=[agent],
-                tasks=[task],
+                agents=[researcher],
+                tasks=[research_task],
                 verbose=True,
-                callbacks=[handler]
+                process=Process.sequential
             )
 
+            # Get research results
             result = crew.kickoff()
-
-            # Update session state
-            st.chat_message("assistant").write(result)
-
+            
+            # Structure the data
+            research_data = {
+                "business_info": {
+                    "name": self.business_name,
+                    "website": self.website_url,
+                    "industry": self.industry,
+                    "product_service": self.product_service,
+                    "target_audience": self.target_audience
+                },
+                "research_data": self._extract_research_data(result),
+                "collected_at": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            
+            return research_data
+            
         except Exception as e:
-            st.error(f"An error occurred: {str(e)}")
+            st.error(f"Data collection error: {str(e)}")
+            return None
 
-    # Clear chat history button
-    if st.button("Clear Chat History"):
-        st.session_state.clear()
-        st.rerun()
+    def _extract_research_data(self, result):
+        """Extract and structure research data from result"""
+        try:
+            if hasattr(result, 'result'):
+                return str(result.result)
+            elif hasattr(result, 'raw'):
+                return str(result.raw)
+            return str(result)
+        except Exception as e:
+            st.error(f"Data extraction error: {str(e)}")
+            return "Error extracting research data"
+
+def display_research_results(data):
+    """Display collected research data"""
+    st.header("Collected Business Information")
+    
+    # Display basic business info
+    st.subheader("Business Details")
+    business_info = data["business_info"]
+    st.write(f"**Name:** {business_info['name']}")
+    st.write(f"**Industry:** {business_info['industry']}")
+    st.write(f"**Website:** {business_info['website']}")
+    
+    # Display research findings
+    st.subheader("Research Findings")
+    st.write(data["research_data"])
+    
+    # Show collection timestamp
+    st.caption(f"Information collected at: {data['collected_at']}")
+    
+    # Success message with next steps
+    st.success("""
+        Research data has been collected and stored for further analysis.
+        This information will be available to subsequent analysis tools.
+    """)
+
+if __name__ == "__main__":
+    run_businessanalyst()
