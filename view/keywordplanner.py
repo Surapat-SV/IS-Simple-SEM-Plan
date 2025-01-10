@@ -1,36 +1,52 @@
 # view/keywordplanner.py
 
 from crewai import Agent, Task, Crew, Process, LLM
+from crewai.tools import BaseTool
 from google.cloud import bigquery
+from google.oauth2 import service_account
 import streamlit as st
 import pandas as pd
 from textwrap import dedent
 import plotly.express as px
-
-from crewai.tools import BaseTool
+import json
+from typing import Optional
 
 class BigQueryKeywordTool(BaseTool):
     name: str = "BigQuery Keyword Data Tool"
     description: str = "Fetches keyword data from BigQuery database with monthly searches and competition data"
+    client: Optional[bigquery.Client] = None
     
-    def __init__(self, project_id="is-madt3-6610424015"):
+    def __init__(self):
         """Initialize BigQuery tool with project credentials"""
         super().__init__()
         try:
-            self.client = bigquery.Client(project=project_id)
+            # Get credentials from Streamlit secrets
+            credentials_info = json.loads(st.secrets["general"]["GOOGLE_APPLICATION_CREDENTIALS_JSON"])
+            credentials = service_account.Credentials.from_service_account_info(credentials_info)
+            
+            # Initialize BigQuery client
+            self.client = bigquery.Client(
+                credentials=credentials,
+                project=credentials_info["project_id"]
+            )
         except Exception as e:
             st.error(f"Failed to initialize BigQuery client: {str(e)}")
             self.client = None
 
     def _run(self, keyword: str) -> str:
         """Execute the tool's main functionality"""
-        return self.execute_query(keyword).to_string()
-        
+        try:
+            df = self.execute_query(keyword)
+            if df.empty:
+                return "No results found for the given keyword."
+            return df.to_string()
+        except Exception as e:
+            return f"Error executing query: {str(e)}"
+
     def execute_query(self, keyword: str) -> pd.DataFrame:
         """Execute BigQuery query with proper parameter handling"""
         if not self.client:
-            st.error("BigQuery client not initialized")
-            return pd.DataFrame()
+            raise Exception("BigQuery client not initialized")
 
         try:
             query = """
