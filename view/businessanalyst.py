@@ -1,4 +1,3 @@
-# Ensure compatibility for SQLite in certain environments
 __import__('pysqlite3')
 import sys
 sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
@@ -9,79 +8,31 @@ from crewai_tools import SerperDevTool, ScrapeWebsiteTool
 from dotenv import load_dotenv
 import json
 import pandas as pd
+import uuid
 
 # Load environment variables
 load_dotenv()
 
-def run_businessanalyst():
-    """Main function to run the Business Analyst tool and store results"""
-    
-    st.title("Business Research Tool")
-    st.markdown("Collect and analyze business information for further processing.")
+# Callback Handler for Streamlit
+class StreamlitCallbackHandler:
+    def __init__(self, agent_name: str):
+        self.agent_name = agent_name
 
-    # Input form
-    with st.form("business_research_form"):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            business_name = st.text_input("Business Name")
-            product_service = st.text_input("Product or Service")
+    def on_chain_start(self, serialized, inputs, **kwargs):
+        message = inputs.get("input", "Processing...")
+        if "messages" in st.session_state:
+            st.session_state["messages"].append({"role": self.agent_name, "content": message})
+        st.chat_message(self.agent_name).write(message)
 
-        with col2:
-            website_url = st.text_input("Website URL")
-            industry = st.selectbox(
-                "Industry",
-                ["Technology", "E-commerce", "Healthcare", "Finance", 
-                 "Education", "Real Estate", "Manufacturing", "Other"]
-            )
-
-        target_audience_input = st.text_area(
-            "Target Audience Description",
-            height=100
-        )
-
-        submitted = st.form_submit_button("Research", type="primary", use_container_width=True)
-
-    if submitted and all([business_name, product_service, target_audience_input, website_url]):
-        with st.spinner('Collecting business information...'):
-            try:
-                # Initialize researcher
-                researcher = BusinessResearcher(
-                    business_name=business_name,
-                    product_service=product_service,
-                    target_audience=target_audience_input,
-                    website_url=website_url,
-                    industry=industry
-                )
-                
-                # Collect business data
-                research_data = researcher.collect_data()
-                
-                if research_data:
-                    # Store the JSON data in session state for later use
-                    st.session_state.business_research = research_data
-                    
-                    # Display the collected information
-                    display_research_results(research_data)
-                    
-                    # Show raw JSON for debugging/verification
-                    with st.expander("Raw Research Data (JSON)", expanded=False):
-                        st.code(json.dumps(research_data, indent=2), language='json')
-
-            except Exception as e:
-                st.error(f"Research error: {str(e)}")
-    elif submitted:
-        st.warning("Please fill in all required fields.")
+    def on_chain_end(self, outputs, **kwargs):
+        message = outputs.get("output", "Completed")
+        if "messages" in st.session_state:
+            st.session_state["messages"].append({"role": self.agent_name, "content": message})
+        st.chat_message(self.agent_name).write(message)
 
 class BusinessResearcher:
     """Class to handle business research and data collection"""
-    
-    def __init__(self, business_name, product_service, target_audience, website_url, industry):
-        self.business_name = business_name
-        self.product_service = product_service
-        self.target_audience = target_audience
-        self.website_url = website_url
-        self.industry = industry
+    def __init__(self):
         self.serper_api_key = st.secrets['SERPER_API_KEY']
         self.gemini_api_key = st.secrets['GEMINI_API_KEY']
         self.llm = LLM(
@@ -92,114 +43,83 @@ class BusinessResearcher:
         self.search_tool = SerperDevTool(api_key=self.serper_api_key)
         self.scrape_tool = ScrapeWebsiteTool()
 
-    def _create_researcher_agent(self):
-        """Create research agent"""
+    def create_researcher_agent(self):
         return Agent(
             role="Business Researcher",
-            goal=f"Research and collect comprehensive data about {self.business_name}",
+            goal="Engage users in structured conversation to gather detailed business information.",
             backstory="Expert in business research and data collection",
             tools=[self.search_tool, self.scrape_tool],
             allow_delegation=False,
             llm=self.llm
         )
 
-    def _create_research_task(self, agent):
-        """Create research task"""
+    def create_research_task(self, agent, context):
         return Task(
             description=f"""
-            Research and collect data for {self.business_name}. 
-            Focus on gathering factual, verifiable information.
-
-            Business Details:
-            - Name: {self.business_name}
-            - Website: {self.website_url}
-            - Product/Service: {self.product_service}
-            - Target Audience: {self.target_audience}
-            - Industry: {self.industry}
-
-            Collect and structure the following information:
-            1. Basic company information
-            2. Product/service details
-            3. Target market information
-            4. Basic competitive position
-            5. Notable online presence details
-
-            Format all information in clear, concise text suitable for future analysis.
+            Engage in a structured conversation to collect business data:
+            - Context: {context}
             """,
-            agent=agent,
-            expected_output="Comprehensive business data in structured format"
+            expected_output="Structured JSON containing business details such as name, products/services, target audience, and goals.",
+            agent=agent
         )
 
-    def collect_data(self):
-        """Collect and structure business research data"""
+def run_businessanalyst():
+    """Run the Business Analyst chatbot"""
+    st.title("Business Analyst Chatbot")
+
+    # Initialize session state
+    if "messages" not in st.session_state:
+        st.session_state["messages"] = []
+    if "context" not in st.session_state:
+        st.session_state["context"] = {}
+    if "thread_id" not in st.session_state:
+        st.session_state["thread_id"] = str(uuid.uuid4())
+
+    # Display chat history
+    for msg in st.session_state["messages"]:
+        avatar = "👤" if msg["role"] == "user" else "🤖"
+        st.chat_message(msg["role"], avatar=avatar).write(msg["content"])
+
+    # User input
+    user_input = st.chat_input(placeholder="Tell me about your business...")
+    if user_input:
+        st.session_state["messages"].append({"role": "user", "content": user_input})
+        st.chat_message("user").write(user_input)
+
         try:
-            researcher = self._create_researcher_agent()
-            research_task = self._create_research_task(researcher)
-            
+            # Initialize researcher
+            researcher = BusinessResearcher()
+            agent = researcher.create_researcher_agent()
+            task = researcher.create_research_task(agent, st.session_state["context"])
+
+            # Create Crew and execute task
+            handler = StreamlitCallbackHandler("Business Analyst")
             crew = Crew(
-                agents=[researcher],
-                tasks=[research_task],
+                agents=[agent],
+                tasks=[task],
                 verbose=True,
-                process=Process.sequential
+                process=Process.sequential,
+                callbacks=[handler]
             )
+            results = crew.kickoff()
 
-            # Get research results
-            result = crew.kickoff()
-            
-            # Structure the data
-            research_data = {
-                "business_info": {
-                    "name": self.business_name,
-                    "website": self.website_url,
-                    "industry": self.industry,
-                    "product_service": self.product_service,
-                    "target_audience": self.target_audience
-                },
-                "research_data": self._extract_research_data(result),
-                "collected_at": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
-            }
-            
-            return research_data
-            
+            # Process results
+            if isinstance(results, list) and results:
+                final_result = results[-1]
+            else:
+                final_result = str(results)
+
+            # Update session state with results
+            st.session_state["messages"].append({"role": "assistant", "content": final_result})
+            st.chat_message("assistant").write(final_result)
+
         except Exception as e:
-            st.error(f"Data collection error: {str(e)}")
-            return None
+            st.error(f"An error occurred: {str(e)}")
 
-    def _extract_research_data(self, result):
-        """Extract and structure research data from result"""
-        try:
-            if hasattr(result, 'result'):
-                return str(result.result)
-            elif hasattr(result, 'raw'):
-                return str(result.raw)
-            return str(result)
-        except Exception as e:
-            st.error(f"Data extraction error: {str(e)}")
-            return "Error extracting research data"
-
-def display_research_results(data):
-    """Display collected research data"""
-    st.header("Collected Business Information")
-    
-    # Display basic business info
-    st.subheader("Business Details")
-    business_info = data["business_info"]
-    st.write(f"**Name:** {business_info['name']}")
-    st.write(f"**Industry:** {business_info['industry']}")
-    st.write(f"**Website:** {business_info['website']}")
-    
-    # Display research findings
-    st.subheader("Research Findings")
-    st.write(data["research_data"])
-    
-    # Show collection timestamp
-    st.caption(f"Information collected at: {data['collected_at']}")
-    
-    # Success message with next steps
-    st.success("""
-        Research data has been collected and stored for further analysis.
-        This information will be available to subsequent analysis tools.
-    """)
+    # Clear chat history button
+    if st.button("Clear Chat History"):
+        st.session_state.clear()
+        st.rerun()
 
 if __name__ == "__main__":
     run_businessanalyst()
